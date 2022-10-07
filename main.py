@@ -1,6 +1,9 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import keyboard  # using module keyboard
+import time
+
 from mediapipe.python.solutions.drawing_utils import _normalized_to_pixel_coordinates
 mp_drawing = mp.solutions.drawing_utils
 mp_drawing_styles = mp.solutions.drawing_styles
@@ -26,8 +29,16 @@ def createBox(img,points,scale=5,masked=False,cropped = True):
         return imgCrop
     else:
         return mask
+
+sparkle = False
+sparkleText = "glitter off - (q)";
+overlay = cv2.imread('test.jpg')
+colors = [cv2.COLORMAP_DEEPGREEN, cv2.COLORMAP_CIVIDIS,  cv2.COLORMAP_INFERNO, cv2.COLORMAP_BONE, cv2.COLORMAP_MAGMA, cv2.COLORMAP_PLASMA]
+colorInd = 0
+colorText = "color index: 0 - (w)"
+
 drawing_spec = mp_drawing.DrawingSpec(thickness=1, circle_radius=1)
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 with mp_face_mesh.FaceMesh(
     max_num_faces=1,
     refine_landmarks=True,
@@ -64,20 +75,71 @@ with mp_face_mesh.FaceMesh(
         upperlipPoints = np.array(upperlipPoints)
         lowerlipPoints = np.array(lowerlipPoints)
         
-        imgUpperLips = createBox(imgOriginal, upperlipPoints, 3, masked=True, cropped=False)
-        imgLowerLips = createBox(imgOriginal, lowerlipPoints, 3, masked=True, cropped=False)
-        imgColoredLower = np.zeros_like(imgLowerLips)
-        imgColoredUpper = np.zeros_like(imgUpperLips)
-        imgColoredLower[:] = 255,0,0
-        imgColoredUpper[:] = 0,0,255
-        finalImg = cv2.bitwise_and(imgUpperLips, imgColoredLower)
-        finalImg += cv2.bitwise_and(imgLowerLips, imgColoredUpper)
+        upperLipMask = createBox(imgOriginal, upperlipPoints, 3, masked=True, cropped=False)
+        lowerLipMask = createBox(imgOriginal, lowerlipPoints, 3, masked=True, cropped=False)
 
-        finalImg = cv2.GaussianBlur(finalImg, (7,7), 10)
-        imgOriginalGray = cv2.cvtColor(imgOriginal, cv2.COLOR_BGR2GRAY)
-        imgOriginalGray = cv2.cvtColor(imgOriginalGray, cv2.COLOR_GRAY2BGR)
-        finalImg = cv2.addWeighted(imgOriginalGray, 1, finalImg, alpha, 0)
-        cv2.imshow("Colored", finalImg)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (40,40))
+
+        upperLipMask = cv2.morphologyEx(upperLipMask, cv2.MORPH_CLOSE, kernel, 1)# Blur the mask to obtain natural result
+        upperLipMask = cv2.GaussianBlur(upperLipMask,(15,15),cv2.BORDER_DEFAULT)# Calculate inverse mask
+        inverseMaskUpper = cv2.bitwise_not(upperLipMask)# Convert masks to float to perform blending
+        upperLipMask = upperLipMask.astype(float)/255
+        inverseMaskUpper = inverseMaskUpper.astype(float)/255# Apply color mapping for the lips
+
+        
+        lowerLipMask = cv2.morphologyEx(lowerLipMask, cv2.MORPH_CLOSE, kernel, 1)# Blur the mask to obtain natural result
+        lowerLipMask = cv2.GaussianBlur(lowerLipMask,(15,15),cv2.BORDER_DEFAULT)# Calculate inverse mask
+        inverseMaskLower = cv2.bitwise_not(lowerLipMask)# Convert masks to float to perform blending
+        lowerLipMask = lowerLipMask.astype(float)/255
+        inverseMaskLower = inverseMaskLower.astype(float)/255# Apply color mapping for the lips
+        
+        lips = cv2.applyColorMap(imgOriginal, colors[colorInd])# Convert lips and face to 0-1 range
+        
+        
+
+        try:
+            if keyboard.is_pressed('q'):
+                sparkle = not sparkle
+                if sparkle:
+                    sparkleText = "glitter on - (q)";
+                else:
+                    sparkleText = "glitter off - (q)";
+
+                time.sleep(0.2)
+            elif keyboard.is_pressed('w'):
+                if colorInd < len(colors)-1:
+                    colorInd += 1
+                    colorText = "color index: "+str(colorInd)+" - (w)"
+                else:
+                    colorInd = 0
+                time.sleep(0.2)
+
+            
+        except:
+            pass
+        
+        if sparkle:
+            overlay=cv2.resize(overlay, (lips.shape[1],lips.shape[0]))
+            lips = cv2.addWeighted(overlay,0.06,lips,0.7,0)
+
+        lips = lips.astype(float)/255
+        face = imgOriginal.astype(float)/255# Multiply lips and face by the masks
+        justLipsUpper = cv2.multiply(upperLipMask, lips)
+        justLipsLower = cv2.multiply(lowerLipMask, lips)
+
+        inverseMask = cv2.multiply(inverseMaskUpper, inverseMaskLower)
+        justFace = cv2.multiply(inverseMask, face)# Add face and lips
+        
+
+        result = justFace + justLipsUpper + justLipsLower
+
+        font = cv2.FONT_HERSHEY_COMPLEX
+        
+        result = cv2.putText(result, sparkleText, (10, 30), font, 0.75, (255, 0, 0), 2, cv2.LINE_AA) 
+        
+        result = cv2.putText(result, colorText, (10, 60), font, 0.75, (255, 0, 0), 2, cv2.LINE_AA) 
+
+        cv2.imshow("Colored", result)
 
         if cv2.waitKey(5) & 0xFF == 27:
             break
